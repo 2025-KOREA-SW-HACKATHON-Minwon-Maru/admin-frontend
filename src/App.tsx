@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
-import { DashboardHome } from './components/dashboard/DashboardHome';
-import { ResultsManagement } from './components/dashboard/ResultsManagement';
+import { CivilDashboard } from './components/dashboard/DashboardHome';
+import { ComplaintsInbox } from './components/dashboard/ResultsManagement';
 import { CBTManagement } from './components/dashboard/CBTManagement';
 import { ResourceManagement } from './components/dashboard/ResourceManagement';
 import { Toaster } from './components/ui/sonner';
@@ -21,8 +21,8 @@ export default function App() {
   // Default authenticated user - no login required
   const user: User = {
     id: '1',
-    name: 'John Adebayo',
-    email: 'john.adebayo@school.edu.ng'
+    name: '김어사',
+    email: 'CommunicationWatchdog@minwon.maru'
   };
 
   const handleLogout = () => {
@@ -38,9 +38,9 @@ export default function App() {
   const renderMainContent = () => {
     switch (activeTab) {
       case 'home':
-        return <DashboardHome teacherName={user.name} />;
+        return <CivilDashboard teacherName={user.name} />;
       case 'results':
-        return <ResultsManagement />;
+        return <ComplaintsInbox />;
       case 'tests':
         return <CBTManagement />;
       case 'resources':

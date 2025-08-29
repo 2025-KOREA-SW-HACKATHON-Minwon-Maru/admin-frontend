@@ -35,8 +35,8 @@ export function Sidebar({ activeTab, onTabChange, onLogout, teacherName }: Sideb
             <Monitor className="w-4 h-4 text-slate-900" />
           </div>
           <div>
-            <h1 className="font-semibold">EduPortal</h1>
-            <p className="text-sm text-slate-400">Academic Platform</p>
+            <h1 className="font-semibold">민원마루</h1>
+            <p className="text-sm text-slate-400">부산시 금정구</p>
           </div>
         </div>
       </div>
@@ -75,7 +75,7 @@ export function Sidebar({ activeTab, onTabChange, onLogout, teacherName }: Sideb
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{teacherName}</p>
-            <p className="text-xs text-slate-400">Teacher</p>
+            <p className="text-xs text-slate-400">상담사</p>
           </div>
         </div>
         <Button

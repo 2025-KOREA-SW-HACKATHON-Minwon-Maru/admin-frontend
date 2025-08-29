@@ -1,774 +1,482 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+// src/components/complaints/ComplaintsInbox.tsx
+import { useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Alert, AlertDescription } from '../ui/alert';
-import { Badge } from '../ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { 
-  Upload, 
-  Download, 
-  Plus, 
-  Trash2, 
-  Save, 
-  FileText,
-  AlertCircle,
-  CheckCircle,
-  User,
-  Eye,
-  Calendar
+import { ScrollArea } from '../ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog';
+import {
+  Filter, Eye, AlertCircle, CheckCircle2, Loader2,
+  Building2, FileText
 } from 'lucide-react';
 
-interface StudentScore {
-  subject: string;
-  score: string;
-  grade: string;
-  remark: string;
+const API_BASE = 'http://localhost:5001';
+const USE_MOCK = false; // ← 실제 API 사용
+
+// 시간 헬퍼
+const isoHoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+
+// ---- 타입 정의 ----
+export type HistoryMessage = {
+  type: 'user' | 'assistant';
+  content: string;
+  timestamp: string; // ISO
+};
+
+export type ComplaintItem = {
+  id: string;
+  title: string;
+  summary: string;
+  departmentId: string;
+  status: '접수' | '처리중' | '완료' | '보류';
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
+  history: HistoryMessage[];
+};
+
+// ---- 부서 메타 ----
+type Department = {
+  id: string; name: string; desc: string;
+  phone?: string; tags?: string[];
+};
+const departments: Department[] = [
+  { id: 'a', name: '기획예산과', desc: '구정 기획·성과관리, 예산 편성·조정' },
+  { id: 'b', name: '감사법무과', desc: '감사·청렴, 소송·법률 자문, 규정 정비' },
+  { id: 'c', name: '행정지원과', desc: '인사·조직·교육, 문서·회의·청사 관리' },
+  { id: 'd', name: '민원봉사과', desc: '제증명 발급·민원 접수 총괄' },
+  { id: 'e', name: '재무과', desc: '회계, 계약, 재산·물품 관리' },
+  { id: 'f', name: '세무1과', desc: '지방세 부과·징수 및 체납관리' },
+  { id: 'g', name: '세무2과', desc: '취득세·등록면허세 등 세원관리' },
+  { id: 'h', name: '문화관광과', desc: '문화·관광 정책, 축제·행사' },
+  { id: 'i', name: '교육체육과', desc: '교육 지원, 학교·체육시설' },
+  { id: 'j', name: '복지정책과', desc: '복지 종합계획·전달체계' },
+  { id: 'k', name: '아동청소년과', desc: '보육, 아동·청소년' },
+  { id: 'l', name: '주민복지과', desc: '복지급여·사례관리' },
+  { id: 'm', name: '생활보장과', desc: '생계·의료·주거·교육급여' },
+  { id: 'n', name: '노인장애인복지과', desc: '노인·장애인 복지' },
+  { id: 'o', name: '일자리경제과', desc: '일자리·창업·소상공인' },
+  { id: 'p', name: '경제산업과', desc: '지역산업·기업지원·전통시장' },
+  { id: 'q', name: '환경위생과', desc: '생활환경·식품/공중위생' },
+  { id: 'r', name: '자원순환과', desc: '폐기물·재활용·수거' },
+  { id: 's', name: '공원녹지과', desc: '공원·녹지·도시숲' },
+  { id: 't', name: '토지정보과', desc: '지적·공시지가·측량' },
+  { id: 'u', name: '안전총괄과', desc: '재난·민방위·안전' },
+  { id: 'v', name: '교통행정과', desc: '대중교통·주차·단속' },
+  { id: 'w', name: '도시관리과', desc: '도시계획·정비·공공시설' },
+  { id: 'x', name: '건설과', desc: '도로·하천 공사·유지' },
+  { id: 'y', name: '건축허가과', desc: '건축 인허가·불법건축물' },
+  { id: 'z', name: '보건행정과', desc: '보건소 행정·감염병' },
+];
+
+// ---- 목 데이터 ----
+const MOCK_ITEMS: ComplaintItem[] = [
+  {
+    id: 'C-20250829-0012',
+    title: '보도블록 파손 신고',
+    summary: '○○로 구간 보도블록 파손으로 보행 불편',
+    departmentId: 'x',
+    status: '처리중',
+    createdAt: isoHoursAgo(26),
+    updatedAt: isoHoursAgo(2),
+    history: [
+      { type: 'user',      content: '우리 동네 ○○로 보도블록이 깨져 있어요. 유모차가 지나가기 어려워요.', timestamp: isoHoursAgo(26) },
+      { type: 'assistant', content: '접수되었습니다. 건설과에 이관하여 조치 예정입니다.', timestamp: isoHoursAgo(25.8) },
+      { type: 'assistant', content: '현장 확인 중입니다. 임시 통행 유도 배너 설치하겠습니다.', timestamp: isoHoursAgo(3.5)  },
+    ],
+  },
+  {
+    id: 'C-20250828-0003',
+    title: '악취 민원',
+    summary: '△△시장 인근에서 야간 악취 발생',
+    departmentId: 'q',
+    status: '접수',
+    createdAt: isoHoursAgo(40),
+    updatedAt: isoHoursAgo(39.5),
+    history: [
+      { type: 'user',      content: '△△시장 근처 밤마다 악취가 나요. 확인 부탁드립니다.', timestamp: isoHoursAgo(40) },
+      { type: 'assistant', content: '접수되었습니다. 환경위생과에서 야간 순찰을 진행하겠습니다.', timestamp: isoHoursAgo(39.5) },
+    ],
+  },
+  {
+    id: 'C-20250827-0041',
+    title: '불법주정차 단속 요청',
+    summary: '학교 앞 횡단보도 상습 주정차',
+    departmentId: 'v',
+    status: '완료',
+    createdAt: isoHoursAgo(72),
+    updatedAt: isoHoursAgo(10),
+    history: [
+      { type: 'user',      content: '아침마다 학교 앞에 차가 서 있어 아이들이 위험합니다.', timestamp: isoHoursAgo(72) },
+      { type: 'assistant', content: '즉시 단속반 배치 후 계도 및 단속 진행하겠습니다.', timestamp: isoHoursAgo(71.8) },
+      { type: 'assistant', content: '계도장 5건, 과태료 2건 처리 완료했습니다.', timestamp: isoHoursAgo(10)   },
+    ],
+  },
+  {
+    id: 'C-20250826-0022',
+    title: '불법건축물 의심 신고',
+    summary: '주택 옥상 무단 증축 추정',
+    departmentId: 'y',
+    status: '보류',
+    createdAt: isoHoursAgo(90),
+    updatedAt: isoHoursAgo(12),
+    history: [
+      { type: 'user',      content: '옆집이 옥상에 구조물을 올렸는데 허가 여부가 궁금합니다.', timestamp: isoHoursAgo(90) },
+      { type: 'assistant', content: '현장 조사 필요로 보류 상태입니다. 일정 확정 후 안내드리겠습니다.', timestamp: isoHoursAgo(12) },
+    ],
+  },
+  {
+    id: 'C-20250829-0030',
+    title: '주민참여예산 문의',
+    summary: '접수 기간과 제출 서식 안내 요청',
+    departmentId: 'a',
+    status: '접수',
+    createdAt: isoHoursAgo(8),
+    updatedAt: isoHoursAgo(7.8),
+    history: [
+      { type: 'user',      content: '주민참여예산 제안 접수 기간이 언제인가요?', timestamp: isoHoursAgo(8) },
+      { type: 'assistant', content: '올해 접수는 9/15~10/5입니다. 서식은 홈페이지에서 내려받을 수 있어요.', timestamp: isoHoursAgo(7.8) },
+    ],
+  },
+  {
+    id: 'C-20250829-0044',
+    title: '독감 예방접종 일정',
+    summary: '어르신 무료 접종 가능 시기 문의',
+    departmentId: 'z',
+    status: '처리중',
+    createdAt: isoHoursAgo(4),
+    updatedAt: isoHoursAgo(1.5),
+    history: [
+      { type: 'user',      content: '만 65세 독감 접종 일정과 장소가 궁금합니다.', timestamp: isoHoursAgo(4) },
+      { type: 'assistant', content: '10월 2주차부터 시작하며 보건소 및 지정 의료기관에서 가능해요.', timestamp: isoHoursAgo(3.8) },
+      { type: 'assistant', content: '지정 의료기관 목록을 링크로 보내드렸습니다.', timestamp: isoHoursAgo(1.5) },
+    ],
+  },
+];
+
+// 클라 필터 (q 빠진 타입 버그 수정)
+function filterMock(
+  items: ComplaintItem[],
+  params: { dept?: string; status?: ComplaintItem['status'] | '전체'; q?: string }
+) {
+  return items.filter(it => {
+    if (params.dept && it.departmentId !== params.dept) return false;
+    if (params.status && params.status !== '전체' && it.status !== params.status) return false;
+    if (params.q && params.q.trim()) {
+      const k = params.q.trim().toLowerCase();
+      const hay = `${it.title} ${it.summary}`.toLowerCase();
+      if (!hay.includes(k)) return false;
+    }
+    return true;
+  });
 }
 
-interface StudentResult {
-  studentId: string;
-  studentName: string;
-  class: string;
-  term: string;
-  session: string;
-  scores: StudentScore[];
-  totalScore: number;
-  averageScore: number;
-  position: number;
-  teacherComment: string;
-  principalComment: string;
-}
+// 상태/채널 선택지
+const statusOptions = ['전체', '접수', '처리중', '완료', '보류'] as const;
 
-export function ResultsManagement() {
-  const [activeTab, setActiveTab] = useState<'csv' | 'manual' | 'student'>('csv');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('');
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [manualResults, setManualResults] = useState([
-    { id: 1, studentId: '', studentName: '', score: '', grade: '' }
-  ]);
+export function ComplaintsInbox() {
+  // 필터 상태
+  const [dept, setDept] = useState<string>(''); // 부서 id
+  const [status, setStatus] = useState<(typeof statusOptions)[number]>('전체');
+  const [q, setQ] = useState<string>('');
 
-  // Student-specific results state
-  const [selectedStudent, setSelectedStudent] = useState('');
-  const [selectedTerm, setSelectedTerm] = useState('');
-  const [selectedSession, setSelectedSession] = useState('');
-  const [studentScores, setStudentScores] = useState<StudentScore[]>([]);
-  const [teacherComment, setTeacherComment] = useState('');
-  const [showResultPreview, setShowResultPreview] = useState(false);
+  // 데이터 상태
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<ComplaintItem[]>([]);
 
-  // Mock data
-  const classes = ['Primary 4A', 'Primary 4B', 'Primary 5A', 'Primary 5B', 'JSS 1A', 'JSS 1B', 'SSS 1A'];
-  const subjects = ['Mathematics', 'English Language', 'Basic Science', 'Social Studies', 'Civic Education', 'Computer Science', 'Creative Arts', 'Physical Education'];
-  const terms = ['First Term', 'Second Term', 'Third Term'];
-  const sessions = ['2023/2024', '2024/2025'];
-  
-  // Mock students for Primary 4A
-  const students = [
-    { id: 'P4A001', name: 'Adebayo Tunde', class: 'Primary 4A' },
-    { id: 'P4A002', name: 'Chioma Okafor', class: 'Primary 4A' },
-    { id: 'P4A003', name: 'Ibrahim Musa', class: 'Primary 4A' },
-    { id: 'P4A004', name: 'Fatima Aliyu', class: 'Primary 4A' },
-    { id: 'P4A005', name: 'Emeka Okwu', class: 'Primary 4A' },
-  ];
+  // 상세 모달
+  const [openId, setOpenId] = useState<string | null>(null);
 
-  const recentResults = [
-    { class: 'Primary 4A', subject: 'Mathematics', students: 32, uploadDate: '2023-12-10', status: 'published' },
-    { class: 'Primary 4B', subject: 'English Language', students: 28, uploadDate: '2023-12-09', status: 'draft' },
-    { class: 'Primary 5A', subject: 'Basic Science', students: 25, uploadDate: '2023-12-08', status: 'published' },
-  ];
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryMessage[]>([]);
 
-  // Initialize student scores when student is selected
-  const initializeStudentScores = (studentId: string) => {
-    if (!studentId) return;
-    
-    const initialScores = subjects.map(subject => ({
-      subject,
-      score: '',
-      grade: '',
-      remark: ''
-    }));
-    
-    setStudentScores(initialScores);
-    setTeacherComment('');
-    setShowResultPreview(false);
-  };
 
-  const calculateGrade = (score: string) => {
-    const num = parseInt(score);
-    if (isNaN(num)) return '';
-    if (num >= 80) return 'A';
-    if (num >= 70) return 'B';
-    if (num >= 60) return 'C';
-    if (num >= 50) return 'D';
-    if (num >= 40) return 'E';
-    return 'F';
-  };
+  const deptMap = useMemo(() => {
+    const m = new Map<string, Department>();
+    departments.forEach(d => m.set(d.id, d));
+    return m;
+  }, []);
 
-  const getGradeRemark = (score: string) => {
-    const num = parseInt(score);
-    if (isNaN(num)) return '';
-    if (num >= 80) return 'Excellent';
-    if (num >= 70) return 'Very Good';
-    if (num >= 60) return 'Good';
-    if (num >= 50) return 'Fair';
-    if (num >= 40) return 'Pass';
-    return 'Fail';
-  };
+  // API/목 데이터 로드
+  // useEffect(() => {
+  //   const controller = new AbortController();
+  //   async function load() {
+  //     try {
+  //       setLoading(true);
+  //       setError(null);
 
-  const updateStudentScore = (subject: string, field: keyof StudentScore, value: string) => {
-    setStudentScores(prev => prev.map(score => {
-      if (score.subject === subject) {
-        const updated = { ...score, [field]: value };
-        if (field === 'score') {
-          updated.grade = calculateGrade(value);
-          updated.remark = getGradeRemark(value);
-        }
-        return updated;
+  //       if (USE_MOCK) {
+  //         await new Promise(r => setTimeout(r, 400));
+  //         setItems(filterMock(MOCK_ITEMS, { dept, status, q }));
+  //         return;
+  //       }
+
+  //       const params = new URLSearchParams();
+  //       if (dept) params.set('departmentId', dept);
+  //       if (status !== '전체') params.set('status', status);
+  //       if (q.trim()) params.set('q', q.trim());
+
+  //       const res = await fetch(`/api/complaints?${params.toString()}`, { signal: controller.signal });
+  //       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  //       const data = (await res.json()) as ComplaintItem[];
+  //       setItems(data);
+  //     } catch (e: any) {
+  //       if (e.name !== 'AbortError') setError(e.message ?? 'Failed to load');
+  //     } finally {
+  //       setLoading(false);
+  //     }
+  //   }
+  //   load();
+  //   return () => controller.abort();
+  // }, [dept, status, q]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const params = new URLSearchParams();
+        if (dept) params.set('departmentId', dept);
+        if (status !== '전체') params.set('status', status);
+        if (q.trim()) params.set('q', q.trim());
+
+        const res = await fetch(`${API_BASE}/api/complaints?${params.toString()}`, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as ComplaintItem[];
+        setItems(data);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') setError(e.message ?? 'Failed to load');
+      } finally {
+        setLoading(false);
       }
-      return score;
-    }));
-  };
-
-  const calculateStudentSummary = () => {
-    const validScores = studentScores.filter(s => s.score && !isNaN(parseInt(s.score)));
-    const totalScore = validScores.reduce((sum, s) => sum + parseInt(s.score), 0);
-    const averageScore = validScores.length > 0 ? totalScore / validScores.length : 0;
-    
-    return {
-      totalScore,
-      averageScore: Math.round(averageScore * 100) / 100,
-      totalSubjects: validScores.length
-    };
-  };
-
-  const handleSaveStudentResult = () => {
-    if (!selectedStudent || !selectedClass || !selectedTerm || !selectedSession) {
-      alert('Please fill in all required fields');
-      return;
     }
+    load();
+    return () => controller.abort();
+  }, [dept, status, q]);
 
-    const validScores = studentScores.filter(s => s.score && !isNaN(parseInt(s.score)));
-    if (validScores.length === 0) {
-      alert('Please enter at least one subject score');
-      return;
-    }
-
-    // Save logic here
-    setUploadStatus('success');
-    setTimeout(() => setUploadStatus('idle'), 3000);
-  };
-
-  const generateResultPreview = () => {
-    const selectedStudentData = students.find(s => s.id === selectedStudent);
-    const summary = calculateStudentSummary();
-    
-    return {
-      studentId: selectedStudent,
-      studentName: selectedStudentData?.name || '',
-      class: selectedClass,
-      term: selectedTerm,
-      session: selectedSession,
-      scores: studentScores.filter(s => s.score && !isNaN(parseInt(s.score))),
-      ...summary,
-      position: 5, // Mock position
-      teacherComment,
-      principalComment: 'Keep up the good work!'
-    };
-  };
-
-  // CSV upload logic (existing)
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-        setUploadStatus('error');
-        return;
+  useEffect(() => {
+    if (!openId) { setHistory([]); setHistoryError(null); return; }
+    const controller = new AbortController();
+    async function loadHistory() {
+      try {
+        setHistoryLoading(true);
+        setHistoryError(null);
+        const res = await fetch(`${API_BASE}/api/chat/${openId}/history`, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setHistory(data.history ?? []);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') setHistoryError(e.message ?? '히스토리 로드 실패');
+      } finally {
+        setHistoryLoading(false);
       }
-      setCsvFile(file);
-      setUploadStatus('idle');
     }
-  };
+    loadHistory();
+    return () => controller.abort();
+  }, [openId]);
 
-  const handleCsvUpload = async () => {
-    if (!csvFile || !selectedClass || !selectedSubject) return;
-    
-    setUploadStatus('uploading');
-    
-    setTimeout(() => {
-      setUploadStatus('success');
-      setCsvFile(null);
-    }, 2000);
-  };
 
-  // Manual entry logic (existing)
-  const addManualResult = () => {
-    setManualResults([...manualResults, { 
-      id: Date.now(), 
-      studentId: '', 
-      studentName: '', 
-      score: '', 
-      grade: '' 
-    }]);
-  };
+  const selected = useMemo(() => items.find(i => i.id === openId) || null, [items, openId]);
 
-  const removeManualResult = (id: number) => {
-    setManualResults(manualResults.filter(result => result.id !== id));
-  };
-
-  const updateManualResult = (id: number, field: string, value: string) => {
-    setManualResults(manualResults.map(result => 
-      result.id === id ? { ...result, [field]: value } : result
-    ));
+  const statusBadge = (s: ComplaintItem['status']) => {
+    switch (s) {
+      case '완료': return <Badge variant="default">완료</Badge>;
+      case '처리중': return <Badge variant="secondary">처리중</Badge>;
+      case '보류': return <Badge variant="outline">보류</Badge>;
+      default: return <Badge variant="outline">접수</Badge>;
+    }
   };
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Results Management</h1>
-        <p className="text-gray-600 mt-1">Upload student results by class and subject</p>
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">민원 접수함</h1>
+          <p className="text-gray-600 mt-1">부서별 민원 리스트와 대화 히스토리를 조회합니다.</p>
+        </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'csv' | 'manual' | 'student')}>
-        <TabsList>
-          <TabsTrigger value="csv">CSV Upload</TabsTrigger>
-          <TabsTrigger value="manual">Manual Entry</TabsTrigger>
-          <TabsTrigger value="student">Student Results</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="csv" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Upload className="w-5 h-5" />
-                Upload Results via CSV
-              </CardTitle>
-              <CardDescription>
-                Upload student results using a CSV file. Ensure your file includes columns: Student ID, Student Name, Score.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="class">Select Class</Label>
-                  <Select value={selectedClass} onValueChange={setSelectedClass}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose a class" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {classes.map(cls => (
-                        <SelectItem key={cls} value={cls}>{cls}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="subject">Select Subject</Label>
-                  <Select value={selectedSubject} onValueChange={setSelectedSubject}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose a subject" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {subjects.map(subject => (
-                        <SelectItem key={subject} value={subject}>{subject}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="csvFile">Upload CSV File</Label>
-                <div className="mt-2">
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleFileUpload}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  />
-                </div>
-                <p className="text-sm text-gray-500 mt-1">
-                  Accepted format: CSV files only. Maximum file size: 10MB.
-                </p>
-              </div>
-
-              {csvFile && (
-                <Alert>
-                  <FileText className="h-4 w-4" />
-                  <AlertDescription>
-                    File ready: {csvFile.name} ({(csvFile.size / 1024).toFixed(1)} KB)
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {uploadStatus === 'error' && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Upload failed. Ensure file is a valid CSV and under 10MB.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {uploadStatus === 'success' && (
-                <Alert>
-                  <CheckCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Results uploaded successfully! Students have been notified.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleCsvUpload}
-                  disabled={!csvFile || !selectedClass || !selectedSubject || uploadStatus === 'uploading'}
-                  className="flex items-center gap-2"
-                >
-                  {uploadStatus === 'uploading' ? (
-                    <>Uploading...</>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      Upload Results
-                    </>
-                  )}
-                </Button>
-                <Button variant="outline" className="flex items-center gap-2">
-                  <Download className="w-4 h-4" />
-                  Download Template
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="manual" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="w-5 h-5" />
-                Manual Entry
-              </CardTitle>
-              <CardDescription>
-                Enter student results manually. Grades will be calculated automatically based on scores.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="class">Select Class</Label>
-                  <Select value={selectedClass} onValueChange={setSelectedClass}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose a class" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {classes.map(cls => (
-                        <SelectItem key={cls} value={cls}>{cls}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="subject">Select Subject</Label>
-                  <Select value={selectedSubject} onValueChange={setSelectedSubject}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose a subject" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {subjects.map(subject => (
-                        <SelectItem key={subject} value={subject}>{subject}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Student ID</TableHead>
-                      <TableHead>Student Name</TableHead>
-                      <TableHead>Score (0-100)</TableHead>
-                      <TableHead>Grade</TableHead>
-                      <TableHead>Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {manualResults.map((result) => (
-                      <TableRow key={result.id}>
-                        <TableCell>
-                          <Input
-                            value={result.studentId}
-                            onChange={(e) => updateManualResult(result.id, 'studentId', e.target.value)}
-                            placeholder="e.g., P4A001"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={result.studentName}
-                            onChange={(e) => updateManualResult(result.id, 'studentName', e.target.value)}
-                            placeholder="Student full name"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={result.score}
-                            onChange={(e) => {
-                              updateManualResult(result.id, 'score', e.target.value);
-                              updateManualResult(result.id, 'grade', calculateGrade(e.target.value));
-                            }}
-                            placeholder="0-100"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={result.score && parseInt(result.score) >= 50 ? 'default' : 'destructive'}>
-                            {result.score ? calculateGrade(result.score) : '-'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeManualResult(result.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="flex gap-2">
-                <Button onClick={addManualResult} variant="outline" className="flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  Add Student
-                </Button>
-                <Button 
-                  className="flex items-center gap-2"
-                  disabled={!selectedClass || !selectedSubject}
-                >
-                  <Save className="w-4 h-4" />
-                  Save Results
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="student" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Individual Student Results
-              </CardTitle>
-              <CardDescription>
-                Input complete results for a specific student across all subjects. Perfect for class teachers managing their students' comprehensive results.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <Label htmlFor="studentClass">Select Class</Label>
-                  <Select 
-                    value={selectedClass} 
-                    onValueChange={(value) => {
-                      setSelectedClass(value);
-                      setSelectedStudent('');
-                      setStudentScores([]);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose your class" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {classes.map(cls => (
-                        <SelectItem key={cls} value={cls}>{cls}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="student">Select Student</Label>
-                  <Select 
-                    value={selectedStudent} 
-                    onValueChange={(value) => {
-                      setSelectedStudent(value);
-                      initializeStudentScores(value);
-                    }}
-                    disabled={!selectedClass}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose a student" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {students.map(student => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {student.name} ({student.id})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="term">Select Term</Label>
-                  <Select value={selectedTerm} onValueChange={setSelectedTerm}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose term" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {terms.map(term => (
-                        <SelectItem key={term} value={term}>{term}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="session">Academic Session</Label>
-                  <Select value={selectedSession} onValueChange={setSelectedSession}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose session" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sessions.map(session => (
-                        <SelectItem key={session} value={session}>{session}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {selectedStudent && studentScores.length > 0 && (
-                <>
-                  <div className="border rounded-lg">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Subject</TableHead>
-                          <TableHead>Score (0-100)</TableHead>
-                          <TableHead>Grade</TableHead>
-                          <TableHead>Remark</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {studentScores.map((score, index) => (
-                          <TableRow key={index}>
-                            <TableCell className="font-medium">{score.subject}</TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                min="0"
-                                max="100"
-                                value={score.score}
-                                onChange={(e) => updateStudentScore(score.subject, 'score', e.target.value)}
-                                placeholder="0-100"
-                                className="w-20"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Badge 
-                                variant={score.score && parseInt(score.score) >= 50 ? 'default' : 'destructive'}
-                                className="w-8 justify-center"
-                              >
-                                {score.grade || '-'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm text-gray-600">{score.remark}</span>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="teacherComment">Teacher's Comment</Label>
-                    <Input
-                      id="teacherComment"
-                      value={teacherComment}
-                      onChange={(e) => setTeacherComment(e.target.value)}
-                      placeholder="Enter your comment about the student's performance..."
-                    />
-                  </div>
-
-                  {studentScores.some(s => s.score) && (
-                    <div className="bg-gray-50 p-4 rounded-lg">
-                      <h4 className="font-medium mb-2">Result Summary</h4>
-                      <div className="grid grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <span className="text-gray-600">Total Score:</span>
-                          <span className="ml-2 font-medium">{calculateStudentSummary().totalScore}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Average:</span>
-                          <span className="ml-2 font-medium">{calculateStudentSummary().averageScore}%</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Subjects:</span>
-                          <span className="ml-2 font-medium">{calculateStudentSummary().totalSubjects}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2">
-                    <Button 
-                      onClick={handleSaveStudentResult}
-                      className="flex items-center gap-2"
-                      disabled={!selectedTerm || !selectedSession || !studentScores.some(s => s.score)}
-                    >
-                      <Save className="w-4 h-4" />
-                      Save Student Result
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => setShowResultPreview(true)}
-                      className="flex items-center gap-2"
-                      disabled={!studentScores.some(s => s.score)}
-                    >
-                      <Eye className="w-4 h-4" />
-                      Preview Result Card
-                    </Button>
-                  </div>
-
-                  {uploadStatus === 'success' && (
-                    <Alert>
-                      <CheckCircle className="h-4 w-4" />
-                      <AlertDescription>
-                        Student result saved successfully! The student can now view their complete result card.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Result Preview Modal */}
-          {showResultPreview && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Student Result Card Preview</span>
-                  <Button variant="ghost" size="sm" onClick={() => setShowResultPreview(false)}>
-                    ×
-                  </Button>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {(() => {
-                  const preview = generateResultPreview();
-                  return (
-                    <div className="bg-white border-2 border-gray-200 p-6 rounded-lg space-y-4">
-                      <div className="text-center border-b pb-4">
-                        <h3 className="font-bold text-lg">STUDENT RESULT CARD</h3>
-                        <p className="text-sm text-gray-600">{preview.session} Academic Session - {preview.term}</p>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div><strong>Name:</strong> {preview.studentName}</div>
-                        <div><strong>Student ID:</strong> {preview.studentId}</div>
-                        <div><strong>Class:</strong> {preview.class}</div>
-                        <div><strong>Position:</strong> {preview.position}</div>
-                      </div>
-
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Subject</TableHead>
-                            <TableHead>Score</TableHead>
-                            <TableHead>Grade</TableHead>
-                            <TableHead>Remark</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {preview.scores.map((score, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{score.subject}</TableCell>
-                              <TableCell>{score.score}</TableCell>
-                              <TableCell>
-                                <Badge variant={parseInt(score.score) >= 50 ? 'default' : 'destructive'}>
-                                  {score.grade}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-sm">{score.remark}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-
-                      <div className="border-t pt-4 space-y-2">
-                        <div className="grid grid-cols-3 gap-4 text-sm">
-                          <div><strong>Total Score:</strong> {preview.totalScore}</div>
-                          <div><strong>Average:</strong> {preview.averageScore}%</div>
-                          <div><strong>No. of Subjects:</strong> {preview.totalSubjects}</div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 text-sm">
-                        <div><strong>Class Teacher's Comment:</strong> {preview.teacherComment || 'No comment provided'}</div>
-                        <div><strong>Principal's Comment:</strong> {preview.principalComment}</div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* Recent Results */}
+      {/* 필터 */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Results</CardTitle>
-          <CardDescription>Previously uploaded results for your classes</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="w-5 h-5" /> 필터
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Class</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Students</TableHead>
-                <TableHead>Upload Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recentResults.map((result, index) => (
-                <TableRow key={index}>
-                  <TableCell>{result.class}</TableCell>
-                  <TableCell>{result.subject}</TableCell>
-                  <TableCell>{result.students}</TableCell>
-                  <TableCell>{result.uploadDate}</TableCell>
-                  <TableCell>
-                    <Badge variant={result.status === 'published' ? 'default' : 'secondary'}>
-                      {result.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm">View</Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <Label>부서</Label>
+            <Select value={dept} onValueChange={setDept}>
+              <SelectTrigger><SelectValue placeholder="부서 선택" /></SelectTrigger>
+              <SelectContent>
+                {departments.map(d => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>상태</Label>
+            <Select value={status} onValueChange={v => setStatus(v as any)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {statusOptions.map(s => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>키워드</Label>
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="제목/내용 검색" />
+          </div>
         </CardContent>
       </Card>
+
+      {/* 리스트 */}
+      <Card>
+        <CardHeader><CardTitle>민원 목록</CardTitle></CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center gap-2 text-gray-600">
+              <Loader2 className="w-4 h-4 animate-spin" /> 불러오는 중…
+            </div>
+          ) : error ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>불러오기 실패: {error}</AlertDescription>
+            </Alert>
+          ) : items.length === 0 ? (
+            <div className="text-sm text-gray-500">조건에 맞는 민원이 없습니다.</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>제목/요약</TableHead>
+                  <TableHead>부서</TableHead>
+                  <TableHead>상태</TableHead>
+                  <TableHead>접수일</TableHead>
+                  <TableHead>업데이트</TableHead>
+                  <TableHead>보기</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map(row => {
+                  const d = deptMap.get(row.departmentId);
+                  return (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        <div className="font-medium">{row.title}</div>
+                        <div className="text-xs text-gray-500 line-clamp-1">{row.summary}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="text-sm">{d?.name ?? row.departmentId}</span>
+                          {d?.desc && <span className="text-xs text-gray-500 line-clamp-1">{d.desc}</span>}
+                        </div>
+                      </TableCell>
+                      <TableCell>{statusBadge(row.status)}</TableCell>
+                      <TableCell className="text-sm">{new Date(row.createdAt).toLocaleString()}</TableCell>
+                      <TableCell className="text-sm">{new Date(row.updatedAt).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="ghost" onClick={() => setOpenId(row.id)}>
+                          <Eye className="w-4 h-4" /> 보기
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 상세 모달 */}
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] p-0 overflow-hidden">
+          {selected && (
+            <>
+              <DialogHeader className="px-6 pt-6 pb-3 border-b">
+                <DialogTitle className="text-lg">
+                  {selected.title}
+                </DialogTitle>
+                <DialogDescription>
+                  민원 ID {selected.id} · {new Date(selected.createdAt).toLocaleString()}
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* 메타 */}
+              <div className="px-6 py-4 grid grid-cols-2 gap-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4" />
+                  <span>{deptMap.get(selected.departmentId)?.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  <span className="truncate" title={selected.summary}>{selected.summary}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selected.status === '완료' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  <span>{selected.status}</span>
+                </div>
+                <div className="text-xs text-gray-500">
+                  최근 업데이트: {new Date(selected.updatedAt).toLocaleString()}
+                </div>
+              </div>
+
+              {/* 히스토리 */}
+              <div className="px-6 pb-2 font-medium">대화 히스토리</div>
+              <div className="px-6 pb-6">
+                <div className="border rounded-lg h-[48vh] overflow-hidden">
+                  {historyLoading ? (
+                    <div className="h-full flex items-center justify-center text-gray-600 text-sm">불러오는 중…</div>
+                  ) : historyError ? (
+                    <div className="h-full flex items-center justify-center text-red-600 text-sm">{historyError}</div>
+                  ) : (
+                    <ScrollArea className="h-full p-4">
+                      <ul className="space-y-3">
+                        {history.map((m, i) => (
+                          <li key={i} className={`flex ${m.type === 'user' ? 'justify-start' : 'justify-end'}`}>
+                            <div
+                              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm shadow
+                              ${m.type === 'user' ? 'bg-gray-100' : 'bg-indigo-50'}`}
+                              title={new Date(m.timestamp).toLocaleString()}
+                            >
+                              <div className="whitespace-pre-wrap">{m.content}</div>
+                              <div className="mt-1 text-[10px] text-gray-500">{new Date(m.timestamp).toLocaleString()}</div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
+                  )}
+                </div>
+              </div>
+
+              <DialogFooter className="px-6 pb-6">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // TODO: 추후 “사용자 원문 입력” 상세 API 호출 연결
+                    alert('원문 입력 보기: 추후 API 연동 예정');
+                  }}
+                >
+                  원문 입력 보기
+                </Button>
+                <Button onClick={() => setOpenId(null)}>닫기</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -29,9 +29,9 @@ export function LoginForm({ onLogin, error, isLoading }: LoginFormProps) {
           <div className="mx-auto w-12 h-12 bg-primary rounded-full flex items-center justify-center mb-4">
             <span className="text-white font-bold">EP</span>
           </div>
-          <CardTitle>EduPortal</CardTitle>
+          <CardTitle>민원마루</CardTitle>
           <CardDescription>
-            Sign in to your teacher account
+            부산시 금정구
           </CardDescription>
         </CardHeader>
         <CardContent>
