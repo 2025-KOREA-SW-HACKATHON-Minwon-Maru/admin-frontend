@@ -1,5 +1,5 @@
 // src/components/complaints/ComplaintsInbox.tsx
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -9,37 +9,49 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Alert, AlertDescription } from '../ui/alert';
 import { ScrollArea } from '../ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog';
-import {
-  Filter, Eye, AlertCircle, CheckCircle2, Loader2,
-  Building2, FileText
-} from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
+import { Loader2, Filter, Eye, AlertCircle, CheckCircle2, Building2, FileText } from 'lucide-react';
 
+// ==============================
+// Config
+// ==============================
 const API_BASE = 'http://localhost:5001';
-const USE_MOCK = false; // ← 실제 API 사용
 
-// 시간 헬퍼
-const isoHoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
-
-// ---- 타입 정의 ----
+// ==============================
+// Types
+// ==============================
 export type HistoryMessage = {
   type: 'user' | 'assistant';
   content: string;
   timestamp: string; // ISO
 };
 
-export type ComplaintItem = {
-  id: string;
-  title: string;
-  summary: string;
-  departmentId: string;
-  status: '접수' | '처리중' | '완료' | '보류';
-  createdAt: string; // ISO
-  updatedAt: string; // ISO
+export type ChatHistoryResponse = {
+  success: boolean;
+  chatId: string;
   history: HistoryMessage[];
+  departments?: Array<{
+    id?: string;
+    name?: string;
+    phone?: string;
+    [k: string]: any;
+  }>;
+  message?: string;
 };
 
-// ---- 부서 메타 ----
+export type ComplaintItem = {
+  id: string;                 // chatId or dummy id
+  title: string;              // 첫 사용자 메시지
+  summary: string;            // 첫 어시스턴트 답변 요약
+  departmentId: string;       // departments[0]?.id
+  status: '접수' | '처리중' | '완료' | '보류';
+  createdAt: string;          // 첫 메시지 시간
+  updatedAt: string;          // 마지막 메시지 시간
+};
+
+// ==============================
+// Local meta (departments)
+// ==============================
 type Department = {
   id: string; name: string; desc: string;
   phone?: string; tags?: string[];
@@ -73,129 +85,142 @@ const departments: Department[] = [
   { id: 'z', name: '보건행정과', desc: '보건소 행정·감염병' },
 ];
 
-// ---- 목 데이터 ----
-const MOCK_ITEMS: ComplaintItem[] = [
-  {
-    id: 'C-20250829-0012',
-    title: '보도블록 파손 신고',
-    summary: '○○로 구간 보도블록 파손으로 보행 불편',
-    departmentId: 'x',
-    status: '처리중',
-    createdAt: isoHoursAgo(26),
-    updatedAt: isoHoursAgo(2),
-    history: [
-      { type: 'user',      content: '우리 동네 ○○로 보도블록이 깨져 있어요. 유모차가 지나가기 어려워요.', timestamp: isoHoursAgo(26) },
-      { type: 'assistant', content: '접수되었습니다. 건설과에 이관하여 조치 예정입니다.', timestamp: isoHoursAgo(25.8) },
-      { type: 'assistant', content: '현장 확인 중입니다. 임시 통행 유도 배너 설치하겠습니다.', timestamp: isoHoursAgo(3.5)  },
-    ],
-  },
-  {
-    id: 'C-20250828-0003',
-    title: '악취 민원',
-    summary: '△△시장 인근에서 야간 악취 발생',
-    departmentId: 'q',
-    status: '접수',
-    createdAt: isoHoursAgo(40),
-    updatedAt: isoHoursAgo(39.5),
-    history: [
-      { type: 'user',      content: '△△시장 근처 밤마다 악취가 나요. 확인 부탁드립니다.', timestamp: isoHoursAgo(40) },
-      { type: 'assistant', content: '접수되었습니다. 환경위생과에서 야간 순찰을 진행하겠습니다.', timestamp: isoHoursAgo(39.5) },
-    ],
-  },
-  {
-    id: 'C-20250827-0041',
-    title: '불법주정차 단속 요청',
-    summary: '학교 앞 횡단보도 상습 주정차',
-    departmentId: 'v',
-    status: '완료',
-    createdAt: isoHoursAgo(72),
-    updatedAt: isoHoursAgo(10),
-    history: [
-      { type: 'user',      content: '아침마다 학교 앞에 차가 서 있어 아이들이 위험합니다.', timestamp: isoHoursAgo(72) },
-      { type: 'assistant', content: '즉시 단속반 배치 후 계도 및 단속 진행하겠습니다.', timestamp: isoHoursAgo(71.8) },
-      { type: 'assistant', content: '계도장 5건, 과태료 2건 처리 완료했습니다.', timestamp: isoHoursAgo(10)   },
-    ],
-  },
-  {
-    id: 'C-20250826-0022',
-    title: '불법건축물 의심 신고',
-    summary: '주택 옥상 무단 증축 추정',
-    departmentId: 'y',
-    status: '보류',
-    createdAt: isoHoursAgo(90),
-    updatedAt: isoHoursAgo(12),
-    history: [
-      { type: 'user',      content: '옆집이 옥상에 구조물을 올렸는데 허가 여부가 궁금합니다.', timestamp: isoHoursAgo(90) },
-      { type: 'assistant', content: '현장 조사 필요로 보류 상태입니다. 일정 확정 후 안내드리겠습니다.', timestamp: isoHoursAgo(12) },
-    ],
-  },
-  {
-    id: 'C-20250829-0030',
-    title: '주민참여예산 문의',
-    summary: '접수 기간과 제출 서식 안내 요청',
-    departmentId: 'a',
-    status: '접수',
-    createdAt: isoHoursAgo(8),
-    updatedAt: isoHoursAgo(7.8),
-    history: [
-      { type: 'user',      content: '주민참여예산 제안 접수 기간이 언제인가요?', timestamp: isoHoursAgo(8) },
-      { type: 'assistant', content: '올해 접수는 9/15~10/5입니다. 서식은 홈페이지에서 내려받을 수 있어요.', timestamp: isoHoursAgo(7.8) },
-    ],
-  },
-  {
-    id: 'C-20250829-0044',
-    title: '독감 예방접종 일정',
-    summary: '어르신 무료 접종 가능 시기 문의',
-    departmentId: 'z',
-    status: '처리중',
-    createdAt: isoHoursAgo(4),
-    updatedAt: isoHoursAgo(1.5),
-    history: [
-      { type: 'user',      content: '만 65세 독감 접종 일정과 장소가 궁금합니다.', timestamp: isoHoursAgo(4) },
-      { type: 'assistant', content: '10월 2주차부터 시작하며 보건소 및 지정 의료기관에서 가능해요.', timestamp: isoHoursAgo(3.8) },
-      { type: 'assistant', content: '지정 의료기관 목록을 링크로 보내드렸습니다.', timestamp: isoHoursAgo(1.5) },
-    ],
-  },
-];
-
-// 클라 필터 (q 빠진 타입 버그 수정)
-function filterMock(
-  items: ComplaintItem[],
-  params: { dept?: string; status?: ComplaintItem['status'] | '전체'; q?: string }
-) {
-  return items.filter(it => {
-    if (params.dept && it.departmentId !== params.dept) return false;
-    if (params.status && params.status !== '전체' && it.status !== params.status) return false;
-    if (params.q && params.q.trim()) {
-      const k = params.q.trim().toLowerCase();
-      const hay = `${it.title} ${it.summary}`.toLowerCase();
-      if (!hay.includes(k)) return false;
-    }
-    return true;
-  });
-}
-
-// 상태/채널 선택지
+// ==============================
+// Utils
+// ==============================
 const statusOptions = ['전체', '접수', '처리중', '완료', '보류'] as const;
 
+const fmt = (iso?: string) => {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '-' : d.toLocaleString('ko-KR', { hour12: false });
+};
+const ellip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+// 랜덤 유틸
+const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+// ==============================
+// Dummy generator
+// ==============================
+type DummyDetail = {
+  history: HistoryMessage[];
+  departments: Array<{ id?: string; name?: string; phone?: string; [k: string]: any }>;
+};
+
+function makeDummyThread(idNum: number): { item: ComplaintItem; detail: DummyDetail } {
+  const dept = pick(departments);
+  const st: ComplaintItem['status'][] = ['접수', '처리중', '완료', '보류'];
+  const status = pick(st);
+  const now = Date.now();
+  const createdAt = new Date(now - randomInt(1, 28) * 24 * 60 * 60 * 1000 - randomInt(0, 23) * 3600 * 1000);
+  const updatedAt = new Date(createdAt.getTime() + randomInt(1, 72) * 3600 * 1000);
+
+  const subjects = [
+    '도로 파손 신고', '불법 주정차 신고', '생활폐기물 수거 지연', '건축 소음 민원',
+    '어린이공원 안전시설 점검 요청', '세금 고지서 문의', '체납 안내 정정 요청',
+    '축제 안내 및 교통 통제 문의', '체육시설 예약 불가', '학교 주변 불법 광고물',
+    '보건소 예방접종 예약 오류', '지적 정정 신청 관련', '공원 수목 전지 요청',
+  ];
+  const place = ['○○로', '△△길', '역삼동', '가양동', '광진구', '천호대로', '시청 인근'];
+  const title = `${pick(subjects)} - ${pick(place)} ${randomInt(1, 99)}길`;
+  const summary = `담당 부서(${dept.name}) 안내 및 처리 절차를 설명했습니다. 접수 상태: ${status}`;
+
+  const item: ComplaintItem = {
+    id: `DUMMY-${idNum}`,
+    title: ellip(title, 50),
+    summary: ellip(summary, 90),
+    departmentId: dept.id,
+    status,
+    createdAt: createdAt.toISOString(),
+    updatedAt: updatedAt.toISOString(),
+  };
+
+  // 더미 히스토리(3~7 turn)
+  const turns = randomInt(3, 7);
+  const history: HistoryMessage[] = [];
+  let t = createdAt.getTime();
+  for (let i = 0; i < turns; i++) {
+    const isUser = i % 2 === 0;
+    const content = isUser
+      ? [
+          `안녕하세요. ${title} 관련해서 문의드립니다.`,
+          `현장 위치는 ${pick(place)} 근처입니다.`,
+          `사진도 첨부했는데 확인 부탁드려요.`,
+          `긴급한 사항은 아니지만 빠른 처리 바랍니다.`,
+        ][i % 4]
+      : [
+          `접수되었습니다. 담당 부서(${dept.name})에서 확인 중입니다.`,
+          `현장 확인 후 추가 조치가 필요하면 연락드리겠습니다.`,
+          `처리 예상 소요는 3~5일입니다.`,
+          `보완 자료(사진 원본)가 있으시면 업로드 부탁드립니다.`,
+        ][i % 4];
+    t += randomInt(10, 180) * 60 * 1000;
+    history.push({
+      type: isUser ? 'user' : 'assistant',
+      content,
+      timestamp: new Date(t).toISOString(),
+    });
+  }
+
+  // 연관 부서 Top3 (랜덤 1~3개)
+  const relatedCount = randomInt(1, 3);
+  const shuffled = [...departments].sort(() => Math.random() - 0.5);
+  const departmentsTop = [dept, ...shuffled.filter(d => d.id !== dept.id)].slice(0, relatedCount);
+
+  const detail: DummyDetail = {
+    history,
+    departments: departmentsTop.map(d => ({ id: d.id, name: d.name, phone: d.phone })),
+  };
+
+  return { item, detail };
+}
+
+function makeManyDummy(count = 60) {
+  const items: ComplaintItem[] = [];
+  const details: Record<string, DummyDetail> = {};
+  for (let i = 1; i <= count; i++) {
+    const { item, detail } = makeDummyThread(i);
+    items.push(item);
+    details[item.id] = detail;
+  }
+  // 최신 순으로 정렬(업데이트 기준)
+  items.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+  return { items, details };
+}
+
+// ==============================
+// Component
+// ==============================
 export function ComplaintsInbox() {
-  // 필터 상태
+  // 필터 (UI만 유지)
   const [dept, setDept] = useState<string>(''); // 부서 id
   const [status, setStatus] = useState<(typeof statusOptions)[number]>('전체');
   const [q, setQ] = useState<string>('');
 
-  // 데이터 상태
+  // 목록
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ComplaintItem[]>([]);
 
-  // 상세 모달
+  // 상세 모달 상태
   const [openId, setOpenId] = useState<string | null>(null);
-
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryMessage[]>([]);
+  const [relevantDepts, setRelevantDepts] = useState<ChatHistoryResponse['departments']>([]);
 
+  // 더미 상세 저장소 (id -> detail)
+  const dummyDetailsRef = useRef<Record<string, DummyDetail>>({});
+
+  const handleResolve = (id: string) => {
+    setItems(prev =>
+      prev.map(it =>
+        it.id === id ? { ...it, status: '완료', updatedAt: new Date().toISOString() } : it
+      )
+    );
+  };
 
   const deptMap = useMemo(() => {
     const m = new Map<string, Department>();
@@ -203,39 +228,7 @@ export function ComplaintsInbox() {
     return m;
   }, []);
 
-  // API/목 데이터 로드
-  // useEffect(() => {
-  //   const controller = new AbortController();
-  //   async function load() {
-  //     try {
-  //       setLoading(true);
-  //       setError(null);
-
-  //       if (USE_MOCK) {
-  //         await new Promise(r => setTimeout(r, 400));
-  //         setItems(filterMock(MOCK_ITEMS, { dept, status, q }));
-  //         return;
-  //       }
-
-  //       const params = new URLSearchParams();
-  //       if (dept) params.set('departmentId', dept);
-  //       if (status !== '전체') params.set('status', status);
-  //       if (q.trim()) params.set('q', q.trim());
-
-  //       const res = await fetch(`/api/complaints?${params.toString()}`, { signal: controller.signal });
-  //       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  //       const data = (await res.json()) as ComplaintItem[];
-  //       setItems(data);
-  //     } catch (e: any) {
-  //       if (e.name !== 'AbortError') setError(e.message ?? 'Failed to load');
-  //     } finally {
-  //       setLoading(false);
-  //     }
-  //   }
-  //   load();
-  //   return () => controller.abort();
-  // }, [dept, status, q]);
-
+  // 초기 로드: API 1건 + 더미 N건
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
@@ -243,48 +236,128 @@ export function ComplaintsInbox() {
         setLoading(true);
         setError(null);
 
-        const params = new URLSearchParams();
-        if (dept) params.set('departmentId', dept);
-        if (status !== '전체') params.set('status', status);
-        if (q.trim()) params.set('q', q.trim());
+        // 1) 더미 먼저 생성해두고
+        const { items: dummyItems, details: dummyDetails } = makeManyDummy(60);
+        dummyDetailsRef.current = dummyDetails;
 
-        const res = await fetch(`${API_BASE}/api/complaints?${params.toString()}`, { signal: controller.signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as ComplaintItem[];
-        setItems(data);
+        // 2) API 항목 로드
+        let apiRow: ComplaintItem | null = null;
+        try {
+          const res = await fetch(`${API_BASE}/api/chat/history`, { signal: controller.signal });
+          if (res.ok) {
+            const data: ChatHistoryResponse = await res.json();
+            if (data.success === false) throw new Error(data.message || '히스토리 로드 실패');
+
+            const msgs = Array.isArray(data.history) ? data.history : [];
+            const firstMsg = msgs[0];
+            const lastMsg = msgs[msgs.length - 1];
+            const firstUser = msgs.find(m => m.type === 'user');
+            const firstAssistant = msgs.find(m => m.type === 'assistant');
+
+            const depId = (data.departments?.[0]?.id as string) || '';
+            apiRow = {
+              id: data.chatId,
+              title: firstUser?.content ? ellip(firstUser.content.replace(/\s+/g, ' '), 50) : '사용자 질문',
+              summary: firstAssistant?.content
+                ? ellip(firstAssistant.content.replace(/\s+/g, ' '), 90)
+                : (firstMsg?.content ? ellip(firstMsg.content.replace(/\s+/g, ' '), 90) : ''),
+              departmentId: depId,
+              status: '접수',
+              createdAt: firstMsg?.timestamp || new Date().toISOString(),
+              updatedAt: lastMsg?.timestamp || new Date().toISOString(),
+            };
+
+            // API 상세는 서버에서 불러오므로 더미 상세에는 추가하지 않음
+          }
+        } catch (e) {
+          // API 실패해도 더미만으로 진행
+        }
+
+        // 3) 목록 구성: API가 있으면 가장 위에, 그 아래 더미들
+        setItems(apiRow ? [apiRow, ...dummyItems] : dummyItems);
       } catch (e: any) {
         if (e.name !== 'AbortError') setError(e.message ?? 'Failed to load');
+        // 더미는 이미 생성됨 → 목록만 더미로 대체
+        const { items: dummyItems } = makeManyDummy(60);
+        setItems(dummyItems);
       } finally {
         setLoading(false);
       }
     }
     load();
     return () => controller.abort();
-  }, [dept, status, q]);
+  }, []);
 
+  // 상세 모달: openId 바뀔 때 히스토리 로드
   useEffect(() => {
-    if (!openId) { setHistory([]); setHistoryError(null); return; }
+    if (!openId) {
+      setHistory([]);
+      setRelevantDepts([]);
+      setHistoryError(null);
+      return;
+    }
+
+    // 더미인지부터 확인
+    const dummyDetail = dummyDetailsRef.current[openId];
+    if (dummyDetail) {
+      // 더미면 API 호출 없이 로컬 상세 사용
+      setHistoryLoading(true);
+      setTimeout(() => {
+        setHistory(dummyDetail.history ?? []);
+        setRelevantDepts(dummyDetail.departments ?? []);
+        setHistoryError(null);
+        setHistoryLoading(false);
+      }, 150); // 살짝 로딩 연출
+      return;
+    }
+
+    // API 항목이면 서버에서 로드
     const controller = new AbortController();
-    async function loadHistory() {
+    async function loadHistory(chatId: string) {
       try {
         setHistoryLoading(true);
         setHistoryError(null);
-        const res = await fetch(`${API_BASE}/api/chat/${openId}/history`, { signal: controller.signal });
+
+        let res = await fetch(`${API_BASE}/api/chat/${encodeURIComponent(chatId)}/history`, { signal: controller.signal });
+        if (!res.ok) {
+          res = await fetch(`${API_BASE}/api/chat/history?chatId=${encodeURIComponent(chatId)}`, { signal: controller.signal });
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+
+        const data: ChatHistoryResponse = await res.json();
+        if (data.success === false) throw new Error(data.message || '히스토리 로드 실패');
+
         setHistory(data.history ?? []);
+        setRelevantDepts(data.departments ?? []);
       } catch (e: any) {
+        setHistory([]);
+        setRelevantDepts([]);
         if (e.name !== 'AbortError') setHistoryError(e.message ?? '히스토리 로드 실패');
       } finally {
         setHistoryLoading(false);
       }
     }
-    loadHistory();
+    loadHistory(openId);
     return () => controller.abort();
   }, [openId]);
 
+  const filteredItems = useMemo(() => {
+    let list = items;
+    if (dept) list = list.filter(i => i.departmentId === dept);
+    if (status !== '전체') list = list.filter(i => i.status === status);
+    if (q.trim()) {
+      const qq = q.trim();
+      list = list.filter(i =>
+        i.title.includes(qq) || i.summary.includes(qq) || i.id.includes(qq)
+      );
+    }
+    return list;
+  }, [items, dept, status, q]);
 
-  const selected = useMemo(() => items.find(i => i.id === openId) || null, [items, openId]);
+  const selected = useMemo(
+    () => items.find(i => i.id === openId) || null,
+    [items, openId]
+  );
 
   const statusBadge = (s: ComplaintItem['status']) => {
     switch (s) {
@@ -301,7 +374,7 @@ export function ComplaintsInbox() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">민원 접수함</h1>
-          <p className="text-gray-600 mt-1">부서별 민원 리스트와 대화 히스토리를 조회합니다.</p>
+          <p className="text-gray-600 mt-1">API 결과 1건 + 더미 항목 다수로 리스트를 구성합니다.</p>
         </div>
       </div>
 
@@ -333,9 +406,9 @@ export function ComplaintsInbox() {
               </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className="md:col-span-2">
             <Label>키워드</Label>
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="제목/내용 검색" />
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="제목/요약/ID 검색" />
           </div>
         </CardContent>
       </Card>
@@ -353,8 +426,8 @@ export function ComplaintsInbox() {
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>불러오기 실패: {error}</AlertDescription>
             </Alert>
-          ) : items.length === 0 ? (
-            <div className="text-sm text-gray-500">조건에 맞는 민원이 없습니다.</div>
+          ) : filteredItems.length === 0 ? (
+            <div className="text-sm text-gray-500">조건에 맞는 항목이 없습니다.</div>
           ) : (
             <Table>
               <TableHeader>
@@ -368,7 +441,7 @@ export function ComplaintsInbox() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map(row => {
+                {filteredItems.map(row => {
                   const d = deptMap.get(row.departmentId);
                   return (
                     <TableRow key={row.id}>
@@ -378,13 +451,13 @@ export function ComplaintsInbox() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="text-sm">{d?.name ?? row.departmentId}</span>
+                          <span className="text-sm">{d?.name ?? (row.departmentId || '부서 미지정')}</span>
                           {d?.desc && <span className="text-xs text-gray-500 line-clamp-1">{d.desc}</span>}
                         </div>
                       </TableCell>
                       <TableCell>{statusBadge(row.status)}</TableCell>
-                      <TableCell className="text-sm">{new Date(row.createdAt).toLocaleString()}</TableCell>
-                      <TableCell className="text-sm">{new Date(row.updatedAt).toLocaleString()}</TableCell>
+                      <TableCell className="text-sm">{fmt(row.createdAt)}</TableCell>
+                      <TableCell className="text-sm">{fmt(row.updatedAt)}</TableCell>
                       <TableCell>
                         <Button size="sm" variant="ghost" onClick={() => setOpenId(row.id)}>
                           <Eye className="w-4 h-4" /> 보기
@@ -400,16 +473,14 @@ export function ComplaintsInbox() {
       </Card>
 
       {/* 상세 모달 */}
-      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
+      <Dialog open={!!openId} onOpenChange={(o) => { if (!o) setOpenId(null); }}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] p-0 overflow-hidden">
-          {selected && (
+          {openId && selected && (
             <>
               <DialogHeader className="px-6 pt-6 pb-3 border-b">
-                <DialogTitle className="text-lg">
-                  {selected.title}
-                </DialogTitle>
+                <DialogTitle className="text-lg">{selected.title}</DialogTitle>
                 <DialogDescription>
-                  민원 ID {selected.id} · {new Date(selected.createdAt).toLocaleString()}
+                  민원 ID {openId}{selected.createdAt ? ` · ${fmt(selected.createdAt)}` : ''}
                 </DialogDescription>
               </DialogHeader>
 
@@ -417,7 +488,7 @@ export function ComplaintsInbox() {
               <div className="px-6 py-4 grid grid-cols-2 gap-3 text-sm">
                 <div className="flex items-center gap-2">
                   <Building2 className="w-4 h-4" />
-                  <span>{deptMap.get(selected.departmentId)?.name}</span>
+                  <span>{(departments.find(d => d.id === selected.departmentId)?.name) ?? selected.departmentId}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <FileText className="w-4 h-4" />
@@ -428,9 +499,23 @@ export function ComplaintsInbox() {
                   <span>{selected.status}</span>
                 </div>
                 <div className="text-xs text-gray-500">
-                  최근 업데이트: {new Date(selected.updatedAt).toLocaleString()}
+                  최근 업데이트: {fmt(selected.updatedAt)}
                 </div>
               </div>
+
+              {/* 연관 부서 */}
+              {relevantDepts && relevantDepts.length > 0 && (
+                <div className="px-6 pb-2">
+                  <div className="text-sm font-medium mb-2">연관 부서(Top 3)</div>
+                  <div className="flex flex-wrap gap-2">
+                    {relevantDepts.slice(0, 3).map((d, i) => (
+                      <Badge key={i} variant="outline">
+                        {d.name || d.id || '부서'}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* 히스토리 */}
               <div className="px-6 pb-2 font-medium">대화 히스토리</div>
@@ -448,10 +533,10 @@ export function ComplaintsInbox() {
                             <div
                               className={`max-w-[80%] rounded-lg px-3 py-2 text-sm shadow
                               ${m.type === 'user' ? 'bg-gray-100' : 'bg-indigo-50'}`}
-                              title={new Date(m.timestamp).toLocaleString()}
+                              title={fmt(m.timestamp)}
                             >
                               <div className="whitespace-pre-wrap">{m.content}</div>
-                              <div className="mt-1 text-[10px] text-gray-500">{new Date(m.timestamp).toLocaleString()}</div>
+                              <div className="mt-1 text-[10px] text-gray-500">{fmt(m.timestamp)}</div>
                             </div>
                           </li>
                         ))}
@@ -461,18 +546,23 @@ export function ComplaintsInbox() {
                 </div>
               </div>
 
-              <DialogFooter className="px-6 pb-6">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    // TODO: 추후 “사용자 원문 입력” 상세 API 호출 연결
-                    alert('원문 입력 보기: 추후 API 연동 예정');
-                  }}
-                >
-                  원문 입력 보기
-                </Button>
-                <Button onClick={() => setOpenId(null)}>닫기</Button>
-              </DialogFooter>
+              {/* 상태 & 액션 버튼 */}
+              <div className="px-6 pb-6 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-500">현재 상태</span>
+                  {statusBadge(selected.status)}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleResolve(selected.id)}
+                    disabled={selected.status === '완료'}
+                  >
+                    {selected.status === '완료' ? '해결됨' : '해결로 변경'}
+                  </Button>
+                  <Button onClick={() => setOpenId(null)}>닫기</Button>
+                </div>
+              </div>
             </>
           )}
         </DialogContent>
